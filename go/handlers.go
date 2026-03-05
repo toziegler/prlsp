@@ -56,7 +56,7 @@ func makeThreadMessage(t *ReviewThread) string {
 	for _, c := range t.Comments {
 		parts = append(parts, fmt.Sprintf("@%s: %s", c.Author, c.Body))
 	}
-	return strings.Join(parts, " \u2192 ")
+	return strings.Join(parts, "\n")
 }
 
 func makeDiagnostic(t *ReviewThread) Diagnostic {
