@@ -49,7 +49,7 @@ def _make_diagnostic(thread: ReviewThread) -> lsp.Diagnostic:
             end=lsp.Position(line=line, character=1000),
         ),
         message=_thread_message(thread),
-        severity=lsp.DiagnosticSeverity.Information,
+        severity=lsp.DiagnosticSeverity.Error,
         source=SOURCE,
         data={
             "thread_id": thread.thread_id,
