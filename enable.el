@@ -18,6 +18,7 @@ regardless; this only controls which auto-start hooks are added.")
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c p c") #'prlsp-comment-on-line)
     (define-key map (kbd "C-c p r") #'prlsp-reply-on-line)
+    (define-key map (kbd "C-c p s") #'prlsp-show-thread)
     map)
   "Keymap for `prlsp-mode'.")
 
@@ -128,8 +129,9 @@ regardless; this only controls which auto-start hooks are added.")
   (string-trim
    (buffer-substring-no-properties prlsp-comment-body-start (point-max))))
 
-(defun prlsp-comment--open-popup (origin uri line kind &optional title comment-id)
-  "Open popup buffer for comment KIND using ORIGIN/URI/LINE context."
+(defun prlsp-comment--open-popup (origin uri line kind &optional title comment-id thread-message)
+  "Open popup buffer for comment KIND using ORIGIN/URI/LINE context.
+THREAD-MESSAGE, when non-nil, is the full conversation text shown as context."
   (let ((popup (get-buffer-create prlsp-comment-buffer-name)))
     (pop-to-buffer popup)
     (let ((inhibit-read-only t)
@@ -149,6 +151,11 @@ regardless; this only controls which auto-start hooks are added.")
                       (if (eq kind 'reply)
                           (or title "Reply to review thread")
                         (format "Comment for `%s` line %d" source line))))
+      (when thread-message
+        (insert "**Thread:**\n\n")
+        (dolist (line (split-string thread-message "\n"))
+          (insert (format "> %s\n" line)))
+        (insert "\n"))
       (insert "Write your comment below.\n\n")
       (insert "---\n\n")
       (setq-local prlsp-comment-body-start (point))
@@ -157,6 +164,29 @@ regardless; this only controls which auto-start hooks are added.")
       (local-set-key (kbd "C-c C-c") #'prlsp-comment-submit)
       (local-set-key (kbd "C-c C-k") #'prlsp-comment-cancel)
       (setq header-line-format "PR comment: C-c C-c submit, C-c C-k cancel"))))
+
+(defun prlsp--diagnostic-message-at-line (line)
+  "Return the prlsp diagnostic message at LINE (1-indexed) in current buffer, or nil."
+  (let ((line0 (1- line)))
+    (pcase (prlsp--detect-backend)
+      ('lsp
+       (when-let ((diags (gethash (lsp--buffer-uri) (lsp-diagnostics t))))
+         (seq-some
+          (lambda (d)
+            (let* ((range (gethash "range" d))
+                   (start (gethash "start" range))
+                   (src (gethash "source" d)))
+              (when (and (= (gethash "line" start) line0)
+                         (equal src "github-review"))
+                (gethash "message" d))))
+          diags)))
+      ('eglot
+       (seq-some
+        (lambda (d)
+          (when (= (1- (line-number-at-pos (flymake-diagnostic-beg d))) line0)
+            (flymake-diagnostic-text d)))
+        (flymake-diagnostics)))
+      (_ nil))))
 
 (defun prlsp--reply-targets (uri line)
   "Return available reply targets for URI at LINE as (TITLE . COMMENT-ID)."
@@ -259,8 +289,37 @@ regardless; this only controls which auto-start hooks are added.")
     (let* ((choice (if (= (length targets) 1)
                        (caar targets)
                      (completing-read "Reply to thread: " (mapcar #'car targets) nil t)))
-           (comment-id (cdr (assoc choice targets))))
-      (prlsp-comment--open-popup origin uri line 'reply choice comment-id))))
+           (comment-id (cdr (assoc choice targets)))
+           (thread-msg (prlsp--diagnostic-message-at-line line)))
+      (prlsp-comment--open-popup origin uri line 'reply choice comment-id thread-msg))))
+
+(defun prlsp-show-thread ()
+  "Show the full review thread at the current line in a read-only popup."
+  (interactive)
+  (unless (and (prlsp--detect-backend) (buffer-file-name))
+    (user-error "Current buffer must be a file with an LSP backend enabled"))
+
+  (let* ((line (line-number-at-pos))
+         (thread-msg (prlsp--diagnostic-message-at-line line)))
+    (unless thread-msg
+      (user-error "No review thread on this line"))
+
+    (let ((buf (get-buffer-create "*prlsp-thread*")))
+      (pop-to-buffer buf)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (if (fboundp 'markdown-mode)
+            (markdown-mode)
+          (text-mode))
+        (insert (format "# Review thread (line %d)\n\n" line))
+        (dolist (comment (split-string thread-msg "\n"))
+          (insert comment)
+          (insert "\n\n"))
+        (setq buffer-read-only t)
+        (goto-char (point-min))
+        (use-local-map (copy-keymap (current-local-map)))
+        (local-set-key (kbd "q") #'quit-window)
+        (setq header-line-format "Review thread: q to close")))))
 
 ;;; --- Backend registration: lsp-mode ---
 
@@ -271,7 +330,7 @@ regardless; this only controls which auto-start hooks are added.")
   (lsp-register-client
    (make-lsp-client
     :new-connection (lsp-stdio-connection
-                     '("python3" "-m" "prlsp"))
+                     '("prlsp_go"))
     :major-modes '(prog-mode markdown-mode gfm-mode zig-mode)
     :server-id 'prlsp))
 
@@ -289,7 +348,7 @@ regardless; this only controls which auto-start hooks are added.")
 
   (add-to-list 'eglot-server-programs
                '((prog-mode markdown-mode gfm-mode zig-mode)
-                 . (prlsp-eglot-server "python3" "-m" "prlsp")))
+                 . (prlsp-eglot-server "prlsp_go")))
 
   (when (eq prlsp-preferred-backend 'eglot)
     (add-hook 'prog-mode-hook #'eglot-ensure)
@@ -306,4 +365,5 @@ regardless; this only controls which auto-start hooks are added.")
         :localleader
         (:prefix ("p" . "prlsp")
          :desc "New PR comment" "c" #'prlsp-comment-on-line
-         :desc "Reply to thread" "r" #'prlsp-reply-on-line)))
+         :desc "Reply to thread" "r" #'prlsp-reply-on-line
+         :desc "Show thread" "s" #'prlsp-show-thread)))
