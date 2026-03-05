@@ -27,7 +27,7 @@
   :group 'tools
   :prefix "prlsp-")
 
-(defcustom prlsp-command '("prlsp_go")
+(defcustom prlsp-command '("prlsp")
   "Command used to start the PRLSP server."
   :type '(repeat string)
   :group 'prlsp)
