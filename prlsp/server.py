@@ -21,12 +21,24 @@ def _uri_to_path(uri: str) -> str:
     return uri
 
 
+def _extract_diag_data(data) -> dict:
+    """Extract the original data from a diagnostic's data field.
+
+    Some editors (e.g. Neovim) wrap the entire original LSP diagnostic
+    inside the data field, so the actual data is at data["data"].
+    """
+    if not isinstance(data, dict):
+        return {}
+    if "thread_id" in data:
+        return data
+    if "data" in data and isinstance(data["data"], dict):
+        return data["data"]
+    return data
+
+
 def _thread_message(thread: ReviewThread) -> str:
-    lines = []
-    for i, c in enumerate(thread.comments):
-        prefix = "  └ " if i > 0 else ""
-        lines.append(f"{prefix}@{c.author}: {c.body}")
-    return "\n".join(lines)
+    parts = [f"@{c.author}: {c.body}" for c in thread.comments]
+    return " → ".join(parts)
 
 
 def _make_diagnostic(thread: ReviewThread) -> lsp.Diagnostic:
@@ -93,55 +105,52 @@ def create_server(github=None) -> PRReviewServer:
     def on_code_action(params: lsp.CodeActionParams) -> list[lsp.CodeAction]:
         actions = []
         uri = params.text_document.uri
+
+        # Resolve actions — tied to diagnostics at cursor
         for diag in params.context.diagnostics:
             if diag.source != SOURCE or not diag.data:
                 continue
-            data = diag.data
+            data = _extract_diag_data(diag.data)
             thread_id = data.get("thread_id", "") if isinstance(data, dict) else ""
-            comment_id = data.get("comment_id", 0) if isinstance(data, dict) else 0
             if not thread_id:
                 continue
 
-            # Resolve action
+            label = "Resolve review thread"
+            for t in server.threads:
+                if t.thread_id == thread_id and t.comments:
+                    c = t.comments[0]
+                    preview = c.body[:40].replace("\n", " ")
+                    label = f"Resolve @{c.author} L{t.line}: \"{preview}...\""
+                    break
+
             actions.append(lsp.CodeAction(
-                title="Resolve review thread",
+                title=label,
                 kind=lsp.CodeActionKind.QuickFix,
                 diagnostics=[diag],
                 command=lsp.Command(
-                    title="Resolve review thread",
+                    title=label,
                     command="prlsp.resolveThread",
                     arguments=[thread_id, uri],
                 ),
             ))
 
-            # Reply action — extract selected text
-            doc = server.workspace.get_text_document(uri)
-            sel = params.range
-            lines = doc.source.splitlines(keepends=True)
-            if sel.start.line == sel.end.line:
-                selected = lines[sel.start.line][sel.start.character:sel.end.character] if sel.start.line < len(lines) else ""
-            else:
-                parts = []
-                for ln in range(sel.start.line, min(sel.end.line + 1, len(lines))):
-                    line_text = lines[ln]
-                    if ln == sel.start.line:
-                        parts.append(line_text[sel.start.character:])
-                    elif ln == sel.end.line:
-                        parts.append(line_text[:sel.end.character])
-                    else:
-                        parts.append(line_text)
-                selected = "".join(parts)
-
-            selected = selected.strip()
-            if selected:
+        # Reply actions — extract selected text, offer for ALL unresolved threads in file
+        selected = _extract_selection(server, uri, params.range)
+        if selected:
+            rel = _uri_to_relpath(server, uri)
+            for t in server.threads:
+                if t.is_resolved or t.path != rel or not t.comments:
+                    continue
+                first = t.comments[0]
+                preview = first.body[:50].replace("\n", " ")
+                title = f"Reply to @{first.author} L{t.line}: \"{preview}...\""
                 actions.append(lsp.CodeAction(
-                    title="Reply to review comment",
+                    title=title,
                     kind=lsp.CodeActionKind.QuickFix,
-                    diagnostics=[diag],
                     command=lsp.Command(
-                        title="Reply to review comment",
+                        title=title,
                         command="prlsp.reply",
-                        arguments=[comment_id, uri, selected],
+                        arguments=[first.database_id, uri, selected],
                     ),
                 ))
 
@@ -189,6 +198,39 @@ def create_server(github=None) -> PRReviewServer:
     return server
 
 
+def _extract_selection(server: PRReviewServer, uri: str, sel: lsp.Range) -> str:
+    """Extract the selected text from a document."""
+    doc = server.workspace.get_text_document(uri)
+    lines = doc.source.splitlines(keepends=True)
+    if not lines:
+        return ""
+    if sel.start.line == sel.end.line:
+        if sel.start.line >= len(lines):
+            return ""
+        text = lines[sel.start.line][sel.start.character:sel.end.character]
+    else:
+        parts = []
+        for ln in range(sel.start.line, min(sel.end.line + 1, len(lines))):
+            line_text = lines[ln]
+            if ln == sel.start.line:
+                parts.append(line_text[sel.start.character:])
+            elif ln == sel.end.line:
+                parts.append(line_text[:sel.end.character])
+            else:
+                parts.append(line_text)
+        text = "".join(parts)
+    return text.strip()
+
+
+def _uri_to_relpath(server: PRReviewServer, uri: str) -> str:
+    """Convert a file URI to a git-root-relative path."""
+    path = _uri_to_path(uri)
+    git_root = server.git_info.root if server.git_info else ""
+    if git_root and path.startswith(git_root):
+        return path[len(git_root):].lstrip("/")
+    return path
+
+
 def _refresh_threads(server: PRReviewServer):
     info = server.git_info
     if not info or not server.pr_number:
@@ -200,13 +242,7 @@ def _refresh_threads(server: PRReviewServer):
 
 
 def _publish_file_diagnostics(server: PRReviewServer, uri: str):
-    path = _uri_to_path(uri)
-    git_root = server.git_info.root if server.git_info else ""
-    if git_root and path.startswith(git_root):
-        rel = path[len(git_root):].lstrip("/")
-    else:
-        rel = path
-
+    rel = _uri_to_relpath(server, uri)
     diagnostics = [
         _make_diagnostic(t)
         for t in server.threads
