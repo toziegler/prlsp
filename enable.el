@@ -1,8 +1,15 @@
 
 ;; Emacs integration for the prlsp server.
+;; Supports both lsp-mode and eglot backends.
 
 (require 'subr-x)
 (require 'seq)
+(require 'cl-lib)
+
+(defvar prlsp-preferred-backend 'lsp
+  "LSP backend for prlsp auto-start hooks: `lsp' or `eglot'.
+Set before this file is loaded.  Both backends are registered
+regardless; this only controls which auto-start hooks are added.")
 
 (defvar prlsp-comment-buffer-name "*prlsp-comment*"
   "Name of the popup buffer used to draft PR comments.")
@@ -25,6 +32,56 @@
 (defvar-local prlsp-comment-kind 'create)
 (defvar-local prlsp-comment-reply-comment-id nil)
 (defvar-local prlsp-comment-body-start nil)
+
+;;; --- Backend abstraction layer ---
+
+(defun prlsp--detect-backend ()
+  "Return the active LSP backend in current buffer: `eglot', `lsp', or nil."
+  (cond
+   ((bound-and-true-p eglot--managed-mode) 'eglot)
+   ((bound-and-true-p lsp-mode) 'lsp)
+   (t nil)))
+
+(defun prlsp--active-p ()
+  "Return non-nil when the current buffer is managed by prlsp."
+  (pcase (prlsp--detect-backend)
+    ('lsp
+     (seq-some
+      (lambda (ws)
+        (eq (lsp--client-server-id (lsp--workspace-client ws)) 'prlsp))
+      (or (and (boundp 'lsp--buffer-workspaces) lsp--buffer-workspaces)
+          (and (fboundp 'lsp-workspaces) (lsp-workspaces)))))
+    ('eglot
+     (when-let ((server (eglot-current-server)))
+       (cl-typep server 'prlsp-eglot-server)))
+    (_ nil)))
+
+(defun prlsp--buffer-uri ()
+  "Return the LSP URI for the current buffer."
+  (pcase (prlsp--detect-backend)
+    ('lsp (lsp--buffer-uri))
+    ('eglot (eglot--path-to-uri (buffer-file-name)))
+    (_ (error "No LSP backend active"))))
+
+(defun prlsp--execute-command (command arguments)
+  "Execute workspace/executeCommand COMMAND with ARGUMENTS vector."
+  (pcase (prlsp--detect-backend)
+    ('lsp
+     (lsp-request "workspace/executeCommand"
+                  `(:command ,command :arguments ,arguments)))
+    ('eglot
+     (eglot-execute-command (eglot-current-server) command arguments))
+    (_ (error "No LSP backend active"))))
+
+(defun prlsp--code-actions (params)
+  "Request textDocument/codeAction with PARAMS."
+  (pcase (prlsp--detect-backend)
+    ('lsp (lsp-request "textDocument/codeAction" params))
+    ('eglot (jsonrpc-request (eglot-current-server)
+                             :textDocument/codeAction params))
+    (_ (error "No LSP backend active"))))
+
+;;; --- Helpers ---
 
 (defun prlsp--obj-get (obj key)
   "Read KEY from LSP response object OBJ (plist/hash/alist)."
@@ -56,20 +113,15 @@
    ((listp args) (nth n args))
    (t nil)))
 
-(defun prlsp--active-p ()
-  "Return non-nil when the current buffer is managed by prlsp."
-  (and (bound-and-true-p lsp-mode)
-       (seq-some
-        (lambda (ws)
-          (eq (lsp--client-server-id (lsp--workspace-client ws)) 'prlsp))
-        (or (and (boundp 'lsp--buffer-workspaces) lsp--buffer-workspaces)
-            (and (fboundp 'lsp-workspaces) (lsp-workspaces))))))
+;;; --- Mode activation ---
 
 (defun prlsp--maybe-enable-mode ()
   "Enable `prlsp-mode' only in buffers connected to prlsp."
   (if (prlsp--active-p)
       (prlsp-mode 1)
     (prlsp-mode -1)))
+
+;;; --- Comment popup ---
 
 (defun prlsp-comment--body ()
   "Return trimmed comment body from current popup buffer."
@@ -115,7 +167,7 @@
                                   :end (:line ,line0 :character ,line-end))
                    :context (:diagnostics ,(vector)
                              :triggerKind 1)))
-         (actions (lsp-request "textDocument/codeAction" params))
+         (actions (prlsp--code-actions params))
          (result nil))
     (dolist (action (append actions nil))
       (let* ((cmd (prlsp--obj-get action :command))
@@ -153,25 +205,23 @@
       (user-error "Comment body is empty"))
 
     (with-current-buffer origin
-      (unless (bound-and-true-p lsp-mode)
-        (user-error "lsp-mode is not active in origin buffer"))
+      (unless (prlsp--detect-backend)
+        (user-error "No LSP backend is active in origin buffer"))
       (pcase kind
         ('reply
          (unless reply-id
            (user-error "Missing reply comment id"))
-         (lsp-request
-          "workspace/executeCommand"
-          `(:command "prlsp.reply"
-                     :arguments [,reply-id
-                                 ,(or uri (lsp--buffer-uri))
-                                 ,body])))
+         (prlsp--execute-command
+          "prlsp.reply"
+          (vector reply-id
+                  (or uri (prlsp--buffer-uri))
+                  body)))
         (_
-         (lsp-request
-          "workspace/executeCommand"
-          `(:command "prlsp.createComment"
-                     :arguments [,(or uri (lsp--buffer-uri))
-                                 ,line
-                                 ,body])))))
+         (prlsp--execute-command
+          "prlsp.createComment"
+          (vector (or uri (prlsp--buffer-uri))
+                  line
+                  body)))))
 
     (quit-window t)
     (message
@@ -182,22 +232,22 @@
 (defun prlsp-comment-on-line ()
   "Open a markdown popup to write a new PR comment for the current line."
   (interactive)
-  (unless (and (bound-and-true-p lsp-mode) (buffer-file-name))
-    (user-error "Current buffer must be a file with lsp-mode enabled"))
+  (unless (and (prlsp--detect-backend) (buffer-file-name))
+    (user-error "Current buffer must be a file with an LSP backend enabled"))
 
   (let* ((origin (current-buffer))
-         (uri (lsp--buffer-uri))
+         (uri (prlsp--buffer-uri))
          (line (line-number-at-pos)))
     (prlsp-comment--open-popup origin uri line 'create)))
 
 (defun prlsp-reply-on-line ()
   "Open a markdown popup to reply to an existing PR review thread."
   (interactive)
-  (unless (and (bound-and-true-p lsp-mode) (buffer-file-name))
-    (user-error "Current buffer must be a file with lsp-mode enabled"))
+  (unless (and (prlsp--detect-backend) (buffer-file-name))
+    (user-error "Current buffer must be a file with an LSP backend enabled"))
 
   (let* ((origin (current-buffer))
-         (uri (lsp--buffer-uri))
+         (uri (prlsp--buffer-uri))
          (line (line-number-at-pos))
          (targets (condition-case err
                       (prlsp--reply-targets uri line)
@@ -212,6 +262,8 @@
            (comment-id (cdr (assoc choice targets))))
       (prlsp-comment--open-popup origin uri line 'reply choice comment-id))))
 
+;;; --- Backend registration: lsp-mode ---
+
 (with-eval-after-load 'lsp-mode
   (add-to-list 'lsp-language-id-configuration
                '(prog-mode . "plaintext"))
@@ -223,12 +275,31 @@
     :major-modes '(prog-mode markdown-mode gfm-mode zig-mode)
     :server-id 'prlsp))
 
-  (add-hook 'prog-mode-hook #'lsp-deferred)
-  (add-hook 'gfm-mode-hook #'lsp-deferred)
-  (add-hook 'lsp-managed-mode-hook #'prlsp--maybe-enable-mode)
-  (add-hook 'after-change-major-mode-hook #'prlsp--maybe-enable-mode))
+  (when (eq prlsp-preferred-backend 'lsp)
+    (add-hook 'prog-mode-hook #'lsp-deferred)
+    (add-hook 'gfm-mode-hook #'lsp-deferred))
 
+  (add-hook 'lsp-managed-mode-hook #'prlsp--maybe-enable-mode))
 
+;;; --- Backend registration: eglot ---
+
+(with-eval-after-load 'eglot
+  (defclass prlsp-eglot-server (eglot-lsp-server) ()
+    :documentation "PRLSP eglot server.")
+
+  (add-to-list 'eglot-server-programs
+               '((prog-mode markdown-mode gfm-mode zig-mode)
+                 . (prlsp-eglot-server "python3" "-m" "prlsp")))
+
+  (when (eq prlsp-preferred-backend 'eglot)
+    (add-hook 'prog-mode-hook #'eglot-ensure)
+    (add-hook 'gfm-mode-hook #'eglot-ensure))
+
+  (add-hook 'eglot-managed-mode-hook #'prlsp--maybe-enable-mode))
+
+(add-hook 'after-change-major-mode-hook #'prlsp--maybe-enable-mode)
+
+;;; --- Doom Emacs integration ---
 
 (after! lsp-mode
   (map! :map prlsp-mode-map
