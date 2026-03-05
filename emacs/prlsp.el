@@ -32,7 +32,7 @@
   :type '(repeat string)
   :group 'prlsp)
 
-(defcustom prlsp-major-modes '(prog-mode zig-mode)
+(defcustom prlsp-major-modes '(prog-mode)
   "Major modes for which PRLSP should be registered."
   :type '(repeat symbol)
   :group 'prlsp)
