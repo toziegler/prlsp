@@ -13,18 +13,11 @@
       devShells = forAllSystems ({ pkgs }: {
         default = pkgs.mkShell {
           packages = [
-            (pkgs.python3.withPackages (ps: [
-              ps.pygls
-              ps.lsprotocol
-            ]))
             pkgs.go
             pkgs.neovim
             pkgs.gh
             pkgs.git
           ];
-          shellHook = ''
-            export PYTHONPATH="$PWD:$PYTHONPATH"
-          '';
         };
       });
     };

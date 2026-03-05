@@ -112,6 +112,13 @@ PYEOF
 git add -A
 git commit -q -m "initial commit"
 
+# Build Go binary
+echo "Building Go binary..."
+(cd "$PROJECT_DIR/go" && go build -o "$PROJECT_DIR/prlsp_go" ./)
+
+export PRLSP_BIN="$PROJECT_DIR/prlsp_go"
+export PRLSP_MOCK="$PROJECT_DIR/test/fixtures/comments.json"
+
 echo "=== prlsp test environment ==="
 echo "Temp repo: $TMPDIR"
 echo "Branch: $(git rev-parse --abbrev-ref HEAD)"
@@ -126,12 +133,5 @@ echo "  <space>e — show diagnostic float"
 echo "  gra      — code action (normal or visual mode)"
 echo "  :PrlspRefresh — re-fetch threads"
 echo ""
-
-# Build Go binary
-echo "Building Go binary..."
-(cd "$PROJECT_DIR" && go build -o "$PROJECT_DIR/prlsp_go" ./go/)
-
-export PRLSP_BIN="$PROJECT_DIR/prlsp_go"
-export PRLSP_MOCK="$PROJECT_DIR/test/fixtures/comments.json"
 
 nvim --clean -u "$PROJECT_DIR/test/init.lua" src/main.py
