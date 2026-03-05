@@ -67,19 +67,20 @@ query($owner: String!, $repo: String!, $pr: Int!) {
 
 
 class GitHubAPI:
-    def find_pr_number(self, owner: str, repo: str, branch: str) -> int | None:
+    def find_pr(self, owner: str, repo: str, branch: str) -> tuple[int, str] | None:
+        """Returns (pr_number, head_sha) or None."""
         out = _run_gh([
             "pr", "list",
             "--repo", f"{owner}/{repo}",
             "--head", branch,
-            "--json", "number",
+            "--json", "number,headRefOid",
             "--limit", "1",
         ])
         if not out:
             return None
         prs = json.loads(out)
         if prs:
-            return prs[0]["number"]
+            return prs[0]["number"], prs[0]["headRefOid"]
         return None
 
     def fetch_review_threads(self, owner: str, repo: str, pr_number: int) -> list[ReviewThread]:
@@ -137,6 +138,31 @@ class GitHubAPI:
         ])
         return out is not None
 
+    def create_review_comment(self, owner: str, repo: str, pr_number: int,
+                              commit_id: str, path: str, line: int, body: str) -> bool:
+        payload = json.dumps({
+            "commit_id": commit_id,
+            "body": "",
+            "event": "COMMENT",
+            "comments": [{
+                "path": path,
+                "line": line,
+                "side": "RIGHT",
+                "body": body,
+            }],
+        })
+        result = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo}/pulls/{pr_number}/reviews",
+             "--input", "-"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            logger.error("create_review_comment failed: %s", result.stderr.strip())
+        return result.returncode == 0
+
 
 class MockGitHub:
     def __init__(self, fixture_path: str):
@@ -156,8 +182,8 @@ class MockGitHub:
                 comments=comments,
             ))
 
-    def find_pr_number(self, owner: str, repo: str, branch: str) -> int | None:
-        return 1
+    def find_pr(self, owner: str, repo: str, branch: str) -> tuple[int, str] | None:
+        return 1, "mock_sha"
 
     def fetch_review_threads(self, owner: str, repo: str, pr_number: int) -> list[ReviewThread]:
         return self._threads
@@ -180,3 +206,15 @@ class MockGitHub:
                     ))
                     return True
         return False
+
+    def create_review_comment(self, owner: str, repo: str, pr_number: int,
+                              commit_id: str, path: str, line: int, body: str) -> bool:
+        import random
+        self._threads.append(ReviewThread(
+            thread_id=f"PRRT_mock_{random.randint(1000,9999)}",
+            path=path,
+            line=line,
+            is_resolved=False,
+            comments=[ReviewComment(database_id=random.randint(9000, 9999), body=body, author="you")],
+        ))
+        return True

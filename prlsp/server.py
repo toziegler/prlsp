@@ -65,6 +65,7 @@ class PRReviewServer(LanguageServer):
         self.gh = github or GitHubAPI()
         self.git_info: GitInfo | None = None
         self.pr_number: int | None = None
+        self.head_sha: str | None = None
         self.threads: list[ReviewThread] = []
 
 
@@ -89,10 +90,11 @@ def create_server(github=None) -> PRReviewServer:
             return
 
         info = server.git_info
-        server.pr_number = server.gh.find_pr_number(info.owner, info.repo, info.branch)
-        if not server.pr_number:
+        pr_info = server.gh.find_pr(info.owner, info.repo, info.branch)
+        if not pr_info:
             logger.info("No open PR for branch %s", info.branch)
             return
+        server.pr_number, server.head_sha = pr_info
 
         logger.info("Found PR #%d for %s/%s branch %s", server.pr_number, info.owner, info.repo, info.branch)
         _refresh_threads(server)
@@ -150,10 +152,12 @@ def create_server(github=None) -> PRReviewServer:
                     ),
                 ))
 
-        # Reply actions — extract selected text, offer for ALL unresolved threads in file
+        # Selected-text actions: reply to existing threads + create new comment
         selected = _extract_selection(server, uri, params.range)
         if selected:
             rel = _uri_to_relpath(server, uri)
+
+            # Reply to existing threads
             for t in server.threads:
                 if t.is_resolved or t.path != rel or not t.comments:
                     continue
@@ -167,6 +171,20 @@ def create_server(github=None) -> PRReviewServer:
                         title=title,
                         command="prlsp.reply",
                         arguments=[first.database_id, uri, selected],
+                    ),
+                ))
+
+            # Create new review comment at selection start line
+            if server.git_info and server.pr_number and server.head_sha:
+                target_line = params.range.start.line + 1  # 1-indexed for GitHub
+                title = f"New review comment on L{target_line}"
+                actions.append(lsp.CodeAction(
+                    title=title,
+                    kind=lsp.CodeActionKind.QuickFix,
+                    command=lsp.Command(
+                        title=title,
+                        command="prlsp.createComment",
+                        arguments=[uri, target_line, selected],
                     ),
                 ))
 
@@ -191,6 +209,24 @@ def create_server(github=None) -> PRReviewServer:
     @server.command("prlsp.openInBrowser")
     def cmd_open_in_browser(url: str):
         server.window_show_document(lsp.ShowDocumentParams(uri=url, external=True))
+
+    @server.command("prlsp.createComment")
+    def cmd_create_comment(uri: str, line: int, body: str):
+        info = server.git_info
+        if not info or not server.pr_number or not server.head_sha:
+            return
+        rel = _uri_to_relpath(server, uri)
+        ok = server.gh.create_review_comment(
+            info.owner, info.repo, server.pr_number,
+            server.head_sha, rel, line, body)
+        if ok:
+            _refresh_threads(server)
+            _publish_file_diagnostics(server, uri)
+            server.window_show_message(lsp.ShowMessageParams(
+                type=lsp.MessageType.Info, message=f"Review comment posted on L{line}"))
+        else:
+            server.window_show_message(lsp.ShowMessageParams(
+                type=lsp.MessageType.Error, message="Failed to post review comment (line may not be in PR diff)"))
 
     @server.command("prlsp.reply")
     def cmd_reply(comment_id: int, uri: str, body: str):
