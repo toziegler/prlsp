@@ -1,0 +1,66 @@
+{
+  "threads": [
+    {
+      "thread_id": "PRRT_thread001",
+      "path": "src/main.py",
+      "line": 10,
+      "is_resolved": false,
+      "comments": [
+        {
+          "database_id": 1001,
+          "body": "This function should handle the case where `data` is None.",
+          "author": "reviewer1"
+        },
+        {
+          "database_id": 1002,
+          "body": "Good point, I'll add a guard clause.",
+          "author": "author1"
+        }
+      ]
+    },
+    {
+      "thread_id": "PRRT_thread002",
+      "path": "src/main.py",
+      "line": 25,
+      "is_resolved": false,
+      "comments": [
+        {
+          "database_id": 2001,
+          "body": "Consider using a list comprehension here instead of the for loop.",
+          "author": "reviewer2"
+        }
+      ]
+    },
+    {
+      "thread_id": "PRRT_thread003",
+      "path": "src/utils.py",
+      "line": 5,
+      "is_resolved": false,
+      "comments": [
+        {
+          "database_id": 3001,
+          "body": "This import is unused, please remove it.",
+          "author": "reviewer1"
+        }
+      ]
+    },
+    {
+      "thread_id": "PRRT_thread004",
+      "path": "src/utils.py",
+      "line": 42,
+      "is_resolved": true,
+      "comments": [
+        {
+          "database_id": 4001,
+          "body": "Typo in variable name.",
+          "author": "reviewer2"
+        },
+        {
+          "database_id": 4002,
+          "body": "Fixed, thanks!",
+          "author": "author1"
+        }
+      ]
+    }
+  ]
+}
