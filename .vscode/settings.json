@@ -1,13 +1,3 @@
-// Place your settings in this file to overwrite default and user settings.
 {
-    "files.exclude": {
-        "vscode/out": false,
-        "vscode/dist": false
-    },
-    "search.exclude": {
-        "vscode/out": true,
-        "vscode/dist": true
-    },
-    // Turn off tsc task auto detection since we have the necessary tasks as npm scripts
-    "typescript.tsc.autoDetect": "off"
+	"typescript.tsc.autoDetect": "off"
 }

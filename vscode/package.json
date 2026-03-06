@@ -20,13 +20,7 @@
         "title": "prlsp: Show Status"
       }
     ],
-    "keybindings": [
-      {
-        "key": "cmd+.",
-        "command": "editor.action.quickFix",
-        "when": "resourceScheme == prlsp && editorTextFocus"
-      }
-    ]
+    "keybindings": []
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

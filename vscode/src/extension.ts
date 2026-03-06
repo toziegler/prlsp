@@ -41,6 +41,55 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
+  // Custom quick fix command that bypasses VS Code's writable precondition
+  context.subscriptions.push(
+    vscode.commands.registerCommand("prlsp.quickFix", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        return;
+      }
+      const document = editor.document;
+      const range = editor.selection;
+      const diagnostics = vscode.languages.getDiagnostics(document.uri)
+        .filter(d => range.intersection(d.range));
+
+      const actions = await vscode.commands.executeCommand<vscode.CodeAction[]>(
+        "vscode.executeCodeActionProvider",
+        document.uri,
+        range,
+      );
+
+      if (!actions || actions.length === 0) {
+        vscode.window.showInformationMessage("No code actions available");
+        return;
+      }
+
+      const items = actions.map(action => ({
+        label: action.title,
+        action,
+      }));
+
+      const picked = await vscode.window.showQuickPick(items, {
+        placeHolder: "Code actions",
+      });
+
+      if (!picked) {
+        return;
+      }
+
+      const action = picked.action;
+      if (action.edit) {
+        await vscode.workspace.applyEdit(action.edit);
+      }
+      if (action.command) {
+        await vscode.commands.executeCommand(
+          action.command.command,
+          ...(action.command.arguments ?? []),
+        );
+      }
+    }),
+  );
+
   return { client, clientReady };
 }
 
