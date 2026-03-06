@@ -401,6 +401,9 @@ func (s *Server) handleTextDocumentContent(id *json.RawMessage, params json.RawM
 	var text string
 	switch {
 	case u.Host == "status" && u.Path == "":
+		if !s.prListLoaded {
+			go s.fetchPRList()
+		}
 		text = s.renderStatus()
 	case u.Host == "status" && strings.HasPrefix(u.Path, "/"):
 		// prlsp://status/123
@@ -473,9 +476,6 @@ func (s *Server) handleInitialized() {
 		log.Println("Not a git repo or no GitHub remote")
 		return
 	}
-
-	// Fetch PR list asynchronously (independent of current branch having a PR)
-	go s.fetchPRList()
 
 	info := s.gitInfo
 	prNumber, headSHA, ok := s.gh.FindPR(info.Owner, info.Repo, info.Branch)
