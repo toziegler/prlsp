@@ -14,12 +14,6 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
-    "commands": [
-      {
-        "command": "prlsp.refresh",
-        "title": "prlsp: Refresh Review Threads"
-      }
-    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

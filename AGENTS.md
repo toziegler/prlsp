@@ -1,5 +1,12 @@
 # AGENTS
 
+## Project Structure
+
+- `go/` — LSP server (Go)
+- `vscode/` — VS Code client extension (TypeScript)
+- `emacs/` — Emacs client
+- `lsp-spec/` — LSP 3.18 specification (gitignored)
+
 ## LSP Specification
 
 The `lsp-spec/` directory contains the LSP 3.18 specification (pre-release),

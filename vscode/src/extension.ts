@@ -23,16 +23,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   client = new LanguageClient("prlsp", "prlsp", serverOptions, clientOptions);
   client.start();
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("prlsp.refresh", () => {
-      if (client) {
-        return client.sendRequest("workspace/executeCommand", {
-          command: "prlsp.refresh",
-        });
-      }
-    })
-  );
 }
 
 export async function deactivate(): Promise<void> {
