@@ -1,15 +1,17 @@
-import * as assert from 'assert';
+import * as assert from "assert";
+import * as vscode from "vscode";
 
-// You can import and use all API from the 'vscode' module
-// as well as import your extension to test it
-import * as vscode from 'vscode';
-// import * as myExtension from '../../extension';
+suite("prlsp", () => {
+  test("refresh command executes without error", async () => {
+    // Wait for our extension to activate
+    const ext = vscode.extensions.getExtension("undefined_publisher.prlsp")!;
+    assert.ok(ext, "extension not found");
+    await ext.activate();
 
-suite('Extension Test Suite', () => {
-	vscode.window.showInformationMessage('Start all tests.');
+    // Give the LSP client a moment to start (go run compile)
+    await new Promise((r) => setTimeout(r, 10_000));
 
-	test('Sample test', () => {
-		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
-		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
-	});
+    // Should not throw — server responds with null and sends a showMessage notification
+    await vscode.commands.executeCommand("prlsp.refresh");
+  }).timeout(30_000);
 });
