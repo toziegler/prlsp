@@ -14,6 +14,12 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "prlsp.showStatus",
+        "title": "prlsp: Show Status"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
@@ -25,15 +31,15 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^10.0.0-next.21"
   },
   "devDependencies": {
-    "@types/vscode": "^1.109.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "esbuild": "^0.27.3",
-    "typescript": "^5.9.3",
+    "@types/vscode": "^1.109.0",
     "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3"
   }
 }

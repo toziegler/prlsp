@@ -193,6 +193,30 @@ func extractDiagData(data *json.RawMessage) map[string]interface{} {
 	return m
 }
 
+// --- workspace/textDocumentContent ---
+
+func (s *Server) handleTextDocumentContent(id *json.RawMessage, params json.RawMessage) {
+	var p TextDocumentContentParams
+	json.Unmarshal(params, &p)
+
+	u, err := url.Parse(p.URI)
+	if err != nil || u.Scheme != "prlsp" {
+		s.rw.sendResponse(id, nil)
+		return
+	}
+
+	var text string
+	switch u.Host {
+	case "status":
+		text = "hello world"
+	default:
+		s.rw.sendResponse(id, nil)
+		return
+	}
+
+	s.rw.sendResponse(id, TextDocumentContentResult{Text: text})
+}
+
 // --- Handlers ---
 
 func (s *Server) handleInitialize(id *json.RawMessage, params json.RawMessage) {
@@ -217,6 +241,11 @@ func (s *Server) handleInitialize(id *json.RawMessage, params json.RawMessage) {
 					"prlsp.createComment",
 					"prlsp.reply",
 					"prlsp.refresh",
+				},
+			},
+			Workspace: &ServerCapabilitiesWorkspace{
+				TextDocumentContent: &TextDocumentContentOptions{
+					Schemes: []string{"prlsp"},
 				},
 			},
 		},

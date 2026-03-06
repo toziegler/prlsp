@@ -42,9 +42,27 @@ type ServerInfo struct {
 }
 
 type ServerCapabilities struct {
-	TextDocumentSync      int                        `json:"textDocumentSync"`
-	CodeActionProvider    bool                       `json:"codeActionProvider"`
-	ExecuteCommandProvider *ExecuteCommandOptions     `json:"executeCommandProvider,omitempty"`
+	TextDocumentSync       int                            `json:"textDocumentSync"`
+	CodeActionProvider     bool                           `json:"codeActionProvider"`
+	ExecuteCommandProvider *ExecuteCommandOptions         `json:"executeCommandProvider,omitempty"`
+	Workspace              *ServerCapabilitiesWorkspace   `json:"workspace,omitempty"`
+}
+
+type ServerCapabilitiesWorkspace struct {
+	TextDocumentContent *TextDocumentContentOptions `json:"textDocumentContent,omitempty"`
+}
+
+type TextDocumentContentOptions struct {
+	Schemes []string `json:"schemes"`
+}
+
+// workspace/textDocumentContent
+type TextDocumentContentParams struct {
+	URI string `json:"uri"`
+}
+
+type TextDocumentContentResult struct {
+	Text string `json:"text"`
 }
 
 type ExecuteCommandOptions struct {

@@ -7,6 +7,7 @@ import {
 } from "vscode-languageclient/node";
 
 let client: LanguageClient | undefined;
+let clientReady: Promise<void> | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
   const goDir = path.resolve(context.extensionPath, "..", "go");
@@ -22,7 +23,22 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   client = new LanguageClient("prlsp", "prlsp", serverOptions, clientOptions);
-  client.start();
+  client.registerProposedFeatures();
+  clientReady = client.start();
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("prlsp.showStatus", async () => {
+      await clientReady;
+      const uri = vscode.Uri.parse("prlsp://status");
+      const doc = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(doc, {
+        preview: false,
+        viewColumn: vscode.ViewColumn.Beside,
+      });
+    }),
+  );
+
+  return { client, clientReady };
 }
 
 export async function deactivate(): Promise<void> {

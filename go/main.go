@@ -171,6 +171,8 @@ func main() {
 			server.handleCodeAction(msg.ID, msg.Params)
 		case "workspace/executeCommand":
 			server.handleExecuteCommand(msg.ID, msg.Params)
+		case "workspace/textDocumentContent":
+			server.handleTextDocumentContent(msg.ID, msg.Params)
 		case "shutdown":
 			server.rw.sendResponse(msg.ID, nil)
 		case "exit":
