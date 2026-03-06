@@ -156,6 +156,12 @@ func main() {
 			return
 		}
 
+		// Skip responses to server-initiated requests (e.g. workspace/textDocumentContent/refresh)
+		if msg.Method == "" && msg.ID != nil {
+			log.Printf("<< response id=%s", string(*msg.ID))
+			continue
+		}
+
 		log.Printf(">> %s", msg.Method)
 
 		switch msg.Method {
@@ -167,10 +173,14 @@ func main() {
 			server.handleDidOpen(msg.Params)
 		case "textDocument/didChange":
 			server.handleDidChange(msg.Params)
+		case "textDocument/definition":
+			server.handleDefinition(msg.ID, msg.Params)
 		case "textDocument/codeAction":
 			server.handleCodeAction(msg.ID, msg.Params)
 		case "workspace/executeCommand":
 			server.handleExecuteCommand(msg.ID, msg.Params)
+		case "workspace/textDocumentContent":
+			server.handleTextDocumentContent(msg.ID, msg.Params)
 		case "shutdown":
 			server.rw.sendResponse(msg.ID, nil)
 		case "exit":
