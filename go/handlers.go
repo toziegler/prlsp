@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"os/exec"
+	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/glamour"
 )
 
 const source = "github-review"
@@ -21,6 +25,10 @@ type Server struct {
 	threads  []ReviewThread
 	gh       GitHub
 	rootURI  string
+
+	// Status document state
+	prList       []ghPR
+	prListLoaded bool
 }
 
 func newServer(gh GitHub) *Server {
@@ -193,7 +201,192 @@ func extractDiagData(data *json.RawMessage) map[string]interface{} {
 	return m
 }
 
+// --- PR list ---
+
+type ghPR struct {
+	Number     int          `json:"number"`
+	Title      string       `json:"title"`
+	Author     ghAuthor     `json:"author"`
+	Assignees  []ghAssignee `json:"assignees"`
+	HeadRefOid string       `json:"headRefOid"`
+}
+
+type ghAuthor struct {
+	Login string `json:"login"`
+}
+
+type ghAssignee struct {
+	Login string `json:"login"`
+}
+
+func (s *Server) fetchPRList() {
+	cmd := exec.Command("gh", "pr", "list",
+		"--json", "number,author,assignees,title,headRefOid",
+		"--limit", "100",
+	)
+	if s.gitInfo != nil && s.gitInfo.Root != "" {
+		cmd.Dir = s.gitInfo.Root
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("gh pr list failed: %v", err)
+		s.prListLoaded = true
+		return
+	}
+	var prs []ghPR
+	if err := json.Unmarshal(out, &prs); err != nil {
+		log.Printf("gh pr list parse error: %v", err)
+	}
+	s.prList = prs
+	s.prListLoaded = true
+	log.Printf("Fetched %d PRs", len(prs))
+
+	// Notify client to refresh the status document
+	s.rw.sendRequest("workspace/textDocumentContent/refresh", TextDocumentContentRefreshParams{
+		URI: "prlsp://status",
+	})
+}
+
+const (
+	colMark   = 3  // "*  "
+	colPR     = 16 // "#1234/abcdef01  "
+	colPeople = 40 // "author/assignee                         "
+)
+
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s[:width-1] + " "
+	}
+	return s + strings.Repeat(" ", width-len(s))
+}
+
+func (s *Server) currentHEAD() string {
+	if s.gitInfo == nil {
+		return ""
+	}
+	return runGit([]string{"rev-parse", "HEAD"}, s.gitInfo.Root)
+}
+
+func (s *Server) renderStatus() string {
+	var b strings.Builder
+	head := s.currentHEAD()
+
+	// Header
+	b.WriteString(padRight("", colMark))
+	b.WriteString(padRight("PR", colPR))
+	b.WriteString(padRight("Author/Reviewer", colPeople))
+	b.WriteString("Title\n")
+
+	if !s.prListLoaded {
+		b.WriteString(padRight("", colMark))
+		b.WriteString("Loading...\n")
+		return b.String()
+	}
+
+	for _, pr := range s.prList {
+		shortHash := pr.HeadRefOid
+		if len(shortHash) > 8 {
+			shortHash = shortHash[:8]
+		}
+
+		mark := "  "
+		if head != "" && head == pr.HeadRefOid {
+			mark = "* "
+		}
+
+		num := fmt.Sprintf("#%d/%s", pr.Number, shortHash)
+		assignee := "-"
+		if len(pr.Assignees) > 0 {
+			assignee = pr.Assignees[0].Login
+		}
+		people := pr.Author.Login + "/" + assignee
+
+		b.WriteString(padRight(mark, colMark))
+		b.WriteString(padRight(num, colPR))
+		b.WriteString(padRight(people, colPeople))
+		b.WriteString(pr.Title)
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+// --- textDocument/definition ---
+
+func (s *Server) handleDefinition(id *json.RawMessage, params json.RawMessage) {
+	var p DefinitionParams
+	json.Unmarshal(params, &p)
+
+	// Only handle the status document
+	if p.TextDocument.URI != "prlsp://status" || !s.prListLoaded {
+		s.rw.sendResponse(id, nil)
+		return
+	}
+
+	// Line 0 is header, lines 1..N are PRs
+	prIdx := p.Position.Line - 1
+	if prIdx < 0 || prIdx >= len(s.prList) {
+		s.rw.sendResponse(id, nil)
+		return
+	}
+
+	pr := s.prList[prIdx]
+	uri := fmt.Sprintf("prlsp://status/%d", pr.Number)
+
+	s.rw.sendResponse(id, Location{
+		URI: uri,
+		Range: Range{
+			Start: Position{Line: 0, Character: 0},
+			End:   Position{Line: 0, Character: 0},
+		},
+	})
+}
+
 // --- workspace/textDocumentContent ---
+
+func renderMarkdown(text string) string {
+	r, err := glamour.NewTermRenderer(
+		glamour.WithWordWrap(60),
+		glamour.WithStandardStyle("notty"),
+	)
+	if err != nil {
+		return text
+	}
+	out, err := r.Render(text)
+	if err != nil {
+		return text
+	}
+	return strings.TrimRight(out, "\n")
+}
+
+func (s *Server) renderPRComments(prNumber int) string {
+	if s.gitInfo == nil {
+		return "No git info available\n"
+	}
+
+	threads := s.gh.FetchReviewThreads(s.gitInfo.Owner, s.gitInfo.Repo, prNumber)
+
+	var b strings.Builder
+	first := true
+	for _, t := range threads {
+		if t.IsResolved {
+			continue
+		}
+		for _, c := range t.Comments {
+			if !first {
+				b.WriteString("\n")
+			}
+			first = false
+			b.WriteString(fmt.Sprintf("%s:%d\n", t.Path, t.Line))
+			b.WriteString(fmt.Sprintf("@%s %s\n", c.Author, renderMarkdown(c.Body)))
+		}
+	}
+
+	if b.Len() == 0 {
+		return "No unresolved review comments\n"
+	}
+	return b.String()
+}
 
 func (s *Server) handleTextDocumentContent(id *json.RawMessage, params json.RawMessage) {
 	var p TextDocumentContentParams
@@ -206,9 +399,18 @@ func (s *Server) handleTextDocumentContent(id *json.RawMessage, params json.RawM
 	}
 
 	var text string
-	switch u.Host {
-	case "status":
-		text = "hello world"
+	switch {
+	case u.Host == "status" && u.Path == "":
+		text = s.renderStatus()
+	case u.Host == "status" && strings.HasPrefix(u.Path, "/"):
+		// prlsp://status/123
+		numStr := strings.TrimPrefix(u.Path, "/")
+		prNumber, err := strconv.Atoi(numStr)
+		if err != nil || prNumber <= 0 {
+			s.rw.sendResponse(id, nil)
+			return
+		}
+		text = s.renderPRComments(prNumber)
 	default:
 		s.rw.sendResponse(id, nil)
 		return
@@ -234,6 +436,7 @@ func (s *Server) handleInitialize(id *json.RawMessage, params json.RawMessage) {
 		Capabilities: ServerCapabilities{
 			TextDocumentSync:   1, // Full
 			CodeActionProvider: true,
+			DefinitionProvider: true,
 			ExecuteCommandProvider: &ExecuteCommandOptions{
 				Commands: []string{
 					"prlsp.resolveThread",
@@ -241,6 +444,7 @@ func (s *Server) handleInitialize(id *json.RawMessage, params json.RawMessage) {
 					"prlsp.createComment",
 					"prlsp.reply",
 					"prlsp.refresh",
+					"prlsp.checkout",
 				},
 			},
 			Workspace: &ServerCapabilitiesWorkspace{
@@ -269,6 +473,9 @@ func (s *Server) handleInitialized() {
 		log.Println("Not a git repo or no GitHub remote")
 		return
 	}
+
+	// Fetch PR list asynchronously (independent of current branch having a PR)
+	go s.fetchPRList()
 
 	info := s.gitInfo
 	prNumber, headSHA, ok := s.gh.FindPR(info.Owner, info.Repo, info.Branch)
@@ -413,6 +620,29 @@ func (s *Server) handleCodeAction(id *json.RawMessage, params json.RawMessage) {
 		}
 	}
 
+	// Status document: checkout action
+	if uri == "prlsp://status" && s.prListLoaded && s.gitInfo != nil {
+		// Line 0 is header, lines 1..N are PRs
+		prIdx := p.Range.Start.Line - 1
+		if prIdx >= 0 && prIdx < len(s.prList) {
+			pr := s.prList[prIdx]
+			shortHash := pr.HeadRefOid
+			if len(shortHash) > 8 {
+				shortHash = shortHash[:8]
+			}
+			title := fmt.Sprintf("Checkout #%d/%s", pr.Number, shortHash)
+			actions = append(actions, CodeAction{
+				Title: title,
+				Kind:  CodeActionQuickFix,
+				Command: &Command{
+					Title:     title,
+					Command:   "prlsp.checkout",
+					Arguments: []interface{}{pr.HeadRefOid},
+				},
+			})
+		}
+	}
+
 	if actions == nil {
 		actions = []CodeAction{}
 	}
@@ -434,6 +664,8 @@ func (s *Server) handleExecuteCommand(id *json.RawMessage, params json.RawMessag
 		s.cmdReply(p.Arguments)
 	case "prlsp.refresh":
 		s.cmdRefresh()
+	case "prlsp.checkout":
+		s.cmdCheckout(p.Arguments)
 	}
 
 	// Always respond with null result
@@ -524,6 +756,56 @@ func (s *Server) cmdReply(args []json.RawMessage) {
 	} else {
 		s.showMessage(MessageTypeError, "Failed to post reply")
 	}
+}
+
+func (s *Server) cmdCheckout(args []json.RawMessage) {
+	if len(args) < 1 || s.gitInfo == nil {
+		return
+	}
+	var sha string
+	json.Unmarshal(args[0], &sha)
+	if sha == "" {
+		return
+	}
+
+	// Resolve short hash to full SHA from PR list
+	for _, pr := range s.prList {
+		if strings.HasPrefix(pr.HeadRefOid, sha) {
+			sha = pr.HeadRefOid
+			break
+		}
+	}
+
+	root := s.gitInfo.Root
+
+	// Fetch the commit from origin
+	fetchCmd := exec.Command("git", "fetch", "origin", sha)
+	fetchCmd.Dir = root
+	if out, err := fetchCmd.CombinedOutput(); err != nil {
+		log.Printf("git fetch failed: %v: %s", err, out)
+		s.showMessage(MessageTypeError, fmt.Sprintf("git fetch failed: %v", err))
+		return
+	}
+
+	// Switch to detached HEAD at the commit
+	switchCmd := exec.Command("git", "switch", "--detach", sha)
+	switchCmd.Dir = root
+	if out, err := switchCmd.CombinedOutput(); err != nil {
+		log.Printf("git switch failed: %v: %s", err, out)
+		s.showMessage(MessageTypeError, fmt.Sprintf("git switch failed: %v", err))
+		return
+	}
+
+	shortHash := sha
+	if len(shortHash) > 8 {
+		shortHash = shortHash[:8]
+	}
+	s.showMessage(MessageTypeInfo, fmt.Sprintf("Checked out %s", shortHash))
+
+	// Refresh status to update the * marker
+	s.rw.sendRequest("workspace/textDocumentContent/refresh", TextDocumentContentRefreshParams{
+		URI: "prlsp://status",
+	})
 }
 
 func (s *Server) cmdRefresh() {

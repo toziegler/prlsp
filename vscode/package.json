@@ -19,6 +19,13 @@
         "command": "prlsp.showStatus",
         "title": "prlsp: Show Status"
       }
+    ],
+    "keybindings": [
+      {
+        "key": "cmd+.",
+        "command": "editor.action.quickFix",
+        "when": "resourceScheme == prlsp && editorTextFocus"
+      }
     ]
   },
   "scripts": {

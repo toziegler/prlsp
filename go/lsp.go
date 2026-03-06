@@ -44,6 +44,7 @@ type ServerInfo struct {
 type ServerCapabilities struct {
 	TextDocumentSync       int                            `json:"textDocumentSync"`
 	CodeActionProvider     bool                           `json:"codeActionProvider"`
+	DefinitionProvider     bool                           `json:"definitionProvider,omitempty"`
 	ExecuteCommandProvider *ExecuteCommandOptions         `json:"executeCommandProvider,omitempty"`
 	Workspace              *ServerCapabilitiesWorkspace   `json:"workspace,omitempty"`
 }
@@ -63,6 +64,10 @@ type TextDocumentContentParams struct {
 
 type TextDocumentContentResult struct {
 	Text string `json:"text"`
+}
+
+type TextDocumentContentRefreshParams struct {
+	URI string `json:"uri"`
 }
 
 type ExecuteCommandOptions struct {
@@ -171,6 +176,18 @@ type ShowDocumentParams struct {
 
 type ShowDocumentResult struct {
 	Success bool `json:"success"`
+}
+
+// --- Definition ---
+
+type DefinitionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type Location struct {
+	URI   string `json:"uri"`
+	Range Range  `json:"range"`
 }
 
 // MessageType constants

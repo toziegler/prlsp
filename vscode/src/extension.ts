@@ -19,7 +19,10 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", pattern: "**/*" }],
+    documentSelector: [
+      { scheme: "file", pattern: "**/*" },
+      { scheme: "prlsp" },
+    ],
   };
 
   client = new LanguageClient("prlsp", "prlsp", serverOptions, clientOptions);
