@@ -2,7 +2,7 @@
 
 `prlsp` is an LSP server for surfacing GitHub PR review comments in-editor (as diagnostics), with commands/code-actions to create replies and new comments.
 
-This repository also ships an Emacs package at `emacs/prlsp.el`.
+This repository also ships an Emacs package at `emacs/prlsp.el` and Neovim plugin at root directory.
 
 ## Emacs package (`emacs/prlsp.el`)
 
@@ -70,3 +70,46 @@ The package provides Emacs-side UX helpers (without changing the LSP protocol):
 - `prlsp-setup` registers both `lsp-mode` and `eglot` integrations.
 - `prlsp-preferred-backend` only controls which auto-start hooks are added.
 - If you prefer manual startup, set `(setq prlsp-auto-start nil)` and start your backend yourself.
+
+## Neovim plugin
+
+The plugin provides Lua API:
+
+- `require("prlsp").comment_on_line()`: open markdown buffer to write a new PR comment on current line
+- `require("prlsp").reply_on_line()`: open markdown buffer to reply to a PR review thread on current line
+- `require("prlsp").show_thread()`: show full review thread at current line in markdown side buffer
+- `require("prlsp").refresh()`: refresh PR review threads 
+
+And the equivalent Ex-commands:
+
+- `:PRLSPCommentOnLine`
+- `:PRLSPReplyOnLine`
+- `:PRLSPShowThread`
+- `:PRLSPRefresh`
+
+### Plugin installation
+
+```lua
+-- Neovim 0.12+ required
+vim.pack.add({ "https://github.com/toziegler/prlsp" })
+```
+
+### LSP setup
+
+```lua
+-- Note: plugin hardcodes prlsp LSP name
+vim.lsp.config('prlsp', {
+  cmd = { 'prlsp' }, -- Name of LSP executable or path
+  root_markers = { '.git' },
+})
+
+vim.lsp.enable({'prlsp'})
+```
+
+### Keymap binding example
+
+```lua
+vim.keymap.set('', '<Leader>r', function()
+  require('prlsp').reply_on_line()
+end)
+```
