@@ -156,6 +156,12 @@ func main() {
 			return
 		}
 
+		// An empty 'Method' likely indicates that this is a client response to our request,
+		// such as `window/showDocument`. We discard the request as we do not need the result.
+		if msg.Method == "" {
+			continue
+		}
+
 		log.Printf(">> %s", msg.Method)
 
 		switch msg.Method {
