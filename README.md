@@ -75,14 +75,22 @@ The package provides Emacs-side UX helpers (without changing the LSP protocol):
 
 The plugin provides Lua API:
 
-- `require("prlsp").comment_on_line()`: open markdown buffer to write a new PR comment on current line
-- `require("prlsp").reply_on_line()`: open markdown buffer to reply to a PR review thread on current line
-- `require("prlsp").show_thread()`: show full review thread at current line in markdown side buffer
-- `require("prlsp").refresh()`: refresh PR review threads 
+- `require("prlsp").comment({ start_line, end_line })`  
+  Open a markdown buffer to write a new PR comment on the given line range.  
+  If no range is provided, the current line or visual selection is used.
+
+- `require("prlsp").reply_on_line()`  
+  Open a markdown buffer to reply to a PR review thread on the current line.
+
+- `require("prlsp").show_thread()`  
+  Show the full PR review thread for the current line in a markdown side buffer.
+
+- `require("prlsp").refresh()`  
+  Refresh PR review threads.
 
 And the equivalent Ex-commands:
 
-- `:PRLSPCommentOnLine`
+- `:PRLSPComment`
 - `:PRLSPReplyOnLine`
 - `:PRLSPShowThread`
 - `:PRLSPRefresh`

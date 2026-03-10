@@ -137,17 +137,54 @@ function M.reply_on_line()
 	end)
 end
 
---- Open markdown popup to write a new PR comment on current line.
+--- Open markdown popup to create a PR comment.
+--- If `range` is provided, it will be used as the target line range.
+--- If `range` is nil and the user is in visual mode, the current visual selection is used.
+--- Otherwise the current cursor line is used.
+--- @param range [integer, integer]|nil 1-indexed line range {start_line, end_line}
 --- @return nil
-function M.comment_on_line()
+function M.comment(range)
 	local bufnr = vim.api.nvim_get_current_buf()
+	local mode = vim.api.nvim_get_mode().mode
 
-	local pos = vim.api.nvim_win_get_cursor(0)
-	local line1 = pos[1] -- 1-indexed for GitHub
+	local start_line
+	local end_line
 
-	show_split_editor(vim.fn.expand("%:.") .. "#" .. line1, function(input)
-		lsp_exec_command(bufnr, "prlsp.createComment", { vim.uri_from_bufnr(bufnr), line1, input })
-	end)
+	if not range then
+		if mode == "v" or mode == "V" then
+			start_line = vim.fn.getpos("'<")[2]
+			end_line = vim.fn.getpos("'>")[2]
+		else
+			local pos = vim.api.nvim_win_get_cursor(0)
+			start_line = pos[1]
+			end_line = pos[1]
+		end
+	else
+		if not range[1] or not range[2] then
+			vim.notify("PRLSP: Nil in range", vim.log.levels.ERROR)
+		end
+		start_line = range[1]
+		end_line = range[2]
+	end
+
+	if start_line <= 0 or end_line <= 0 or start_line > end_line then
+		vim.notify(string.format("PRLSP: Invalid line range (%d-%d)", start_line, end_line), vim.log.levels.ERROR)
+		return
+	end
+
+	local uri = vim.uri_from_bufnr(bufnr)
+
+	if start_line == end_line then
+		local line = start_line
+
+		show_split_editor(vim.fn.expand("%:.") .. "#" .. line, function(input)
+			lsp_exec_command(bufnr, "prlsp.createComment", { uri, line, input })
+		end)
+	else
+		show_split_editor(vim.fn.expand("%:.") .. "#" .. start_line .. "-" .. end_line, function(input)
+			lsp_exec_command(bufnr, "prlsp.createCommentRange", { uri, start_line, end_line, input })
+		end)
+	end
 end
 
 --- Refresh PR review threads.
