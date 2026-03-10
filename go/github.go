@@ -34,6 +34,7 @@ type GitHub interface {
 	ResolveThread(threadID string) bool
 	ReplyToComment(owner, repo string, pr, commentID int, body string) bool
 	CreateReviewComment(owner, repo string, pr int, commitID, path string, line int, body string) bool
+	CreateReviewCommentRange(owner, repo string, pr int, commitID, path string, startLine, endLine int, body string) bool
 }
 
 // --- gh CLI helper ---
@@ -222,6 +223,42 @@ func (g *GitHubAPI) CreateReviewComment(owner, repo string, pr int, commitID, pa
 	return true
 }
 
+func (g *GitHubAPI) CreateReviewCommentRange(owner, repo string, pr int, commitID, path string, startLine, endLine int, body string) bool {
+	if startLine <= 0 || endLine <= 0 {
+		return false
+	}
+	if startLine > endLine {
+		return false
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"commit_id": commitID,
+		"body":      "",
+		"event":     "COMMENT",
+		"comments": []map[string]interface{}{
+			{
+				"path":       path,
+				"start_line": startLine,
+				"line":       endLine,
+				"start_side": "RIGHT",
+				"side":       "RIGHT",
+				"body":       body,
+			},
+		},
+	})
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", owner, repo, pr),
+		"--input", "-")
+	cmd.Stdin = strings.NewReader(string(payload))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("create_review_comment_range failed: %s", strings.TrimSpace(string(out)))
+		return false
+	}
+
+	return true
+}
+
 // --- MockGitHub (test double) ---
 
 type MockGitHub struct {
@@ -285,4 +322,11 @@ func (m *MockGitHub) CreateReviewComment(owner, repo string, pr int, commitID, p
 		Comments:   []ReviewComment{{DatabaseID: rand.Intn(1000) + 9000, Body: body, Author: "you"}},
 	})
 	return true
+}
+
+func (m *MockGitHub) CreateReviewCommentRange(owner, repo string, pr int, commitID, path string, startLine, endLine int, body string) bool {
+	if startLine > endLine {
+		startLine, endLine = endLine, startLine
+	}
+	return m.CreateReviewComment(owner, repo, pr, commitID, path, endLine, body)
 }

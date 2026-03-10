@@ -215,6 +215,7 @@ func (s *Server) handleInitialize(id *json.RawMessage, params json.RawMessage) {
 					"prlsp.resolveThread",
 					"prlsp.openInBrowser",
 					"prlsp.createComment",
+					"prlsp.createCommentRange",
 					"prlsp.reply",
 					"prlsp.refresh",
 				},
@@ -401,6 +402,8 @@ func (s *Server) handleExecuteCommand(id *json.RawMessage, params json.RawMessag
 		s.cmdOpenInBrowser(p.Arguments)
 	case "prlsp.createComment":
 		s.cmdCreateComment(p.Arguments)
+	case "prlsp.createCommentRange":
+		s.cmdCreateCommentRange(p.Arguments)
 	case "prlsp.reply":
 		s.cmdReply(p.Arguments)
 	case "prlsp.refresh":
@@ -470,6 +473,33 @@ func (s *Server) cmdCreateComment(args []json.RawMessage) {
 		s.showMessage(MessageTypeInfo, fmt.Sprintf("Review comment posted on L%d", line))
 	} else {
 		s.showMessage(MessageTypeError, "Failed to post review comment (line may not be in PR diff)")
+	}
+}
+
+func (s *Server) cmdCreateCommentRange(args []json.RawMessage) {
+	if len(args) < 4 {
+		return
+	}
+	info := s.gitInfo
+	if info == nil || s.prNumber == 0 || s.headSHA == "" {
+		return
+	}
+	var uri string
+	var startLine, endLine int
+	var body string
+	json.Unmarshal(args[0], &uri)
+	json.Unmarshal(args[1], &startLine)
+	json.Unmarshal(args[2], &endLine)
+	json.Unmarshal(args[3], &body)
+
+	rel := s.uriToRelpath(uri)
+	ok := s.gh.CreateReviewCommentRange(info.Owner, info.Repo, s.prNumber, s.headSHA, rel, startLine, endLine, body)
+	if ok {
+		s.refreshThreads()
+		s.publishFileDiagnostics(uri)
+		s.showMessage(MessageTypeInfo, fmt.Sprintf("Review comment posted on L%d-L%d", startLine, endLine))
+	} else {
+		s.showMessage(MessageTypeError, "Failed to post multi-line review comment (range may not be in PR diff)")
 	}
 }
 
