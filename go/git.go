@@ -25,7 +25,7 @@ func runGit(args []string, cwd string) string {
 
 var (
 	sshRemoteRe   = regexp.MustCompile(`^git@github\.com:([^/]+)/([^/]+?)(?:\.git)?$`)
-	httpsRemoteRe = regexp.MustCompile(`^https://github\.com/([^/]+)/([^/]+?)(?:\.git)?$`)
+	httpsRemoteRe = regexp.MustCompile(`^https://(?:[^.@/]+@)?github\.com/([^/]+)/([^/]+?)(?:\.git)?$`)
 )
 
 func parseRemote(url string) (owner, repo string, ok bool) {
